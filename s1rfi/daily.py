@@ -136,13 +136,19 @@ def run_day(client, day, out_dir, work_root, product_types=("IW_GRDH_1S", "EW_GR
     work = Path(work_root) / f"{day}"
     if len(cat):
         inventory.harvest(client, cat, work, workers=workers, log=log, progress_every=200)
+        if not work.exists() or not any((work / "noise").glob("*/*.parquet")):
+            # nothing at all could be fetched: a service or account problem, not a data one.
+            # Stop without recording the day, so it is retried later and no attempt is used up.
+            raise RuntimeError(f"{day}: none of {len(cat)} products could be harvested; stopping")
     noise, bursts = consolidate(work) if work.exists() else (pd.DataFrame(), pd.DataFrame())
     harvested = noise["product_name"].nunique() if len(noise) else 0
     # products without any noise report still count as harvested if their (empty) file exists
     done_files = {p.stem for p in (work / "noise").glob("*/*.parquet")} if work.exists() else set()
     harvested = max(harvested, len(done_files))
     failed = len(cat) - harvested
-    attempts = int(previous["attempts"]) + 1 if previous is not None and previous.get("status") != "done" else 1
+    # a previous attempt that harvested nothing (e.g. refused login) does not count
+    retry = previous is not None and previous.get("status") != "done" and int(previous.get("harvested") or 0) > 0
+    attempts = int(previous["attempts"]) + 1 if retry else 1
     status = "done" if failed == 0 or attempts >= MAX_ATTEMPTS else "partial"
     n_path, b_path = day_paths(out_dir, day)
     n_path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,6 +168,8 @@ def run(client, manifest_path, out_dir, work_root, summary_path, start=FIRST_DAY
     manifest and summary after every day, and returns the list of files written."""
     t0 = time.monotonic()
     end = end or pd.Timestamp.now("UTC").date()
+    if hasattr(client, "_auth"):
+        client._auth()  # fail fast on bad credentials, before touching any day
     manifest = read_manifest(manifest_path)
     summary = pd.read_csv(summary_path, parse_dates=["day"]) if Path(summary_path).exists() else pd.DataFrame()
     if len(summary):

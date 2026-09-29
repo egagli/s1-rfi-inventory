@@ -121,6 +121,10 @@ def harvest(client, products, out_dir, geolocate="footprint", workers=4, log=pri
             p = futures[fut]
             try:
                 noise, bursts = fut.result()
+            except cdse.AuthError:  # no point trying the other products
+                for f in futures:
+                    f.cancel()
+                raise
             except Exception as e:  # keep going; the product is retried on the next run
                 failed += 1
                 log(f"FAILED {p['name']}: {e}")

@@ -127,6 +127,10 @@ class NotFound(requests.HTTPError):
     """HTTP 404 for a file inside a product (e.g. a guessed file name that does not exist)."""
 
 
+class AuthError(RuntimeError):
+    """The CDSE login was refused (wrong username or password). Never retried."""
+
+
 def _retry_after(r, default):
     try:
         return max(float(r.headers.get("Retry-After", default)), 1.0)
@@ -150,7 +154,7 @@ class Client:
             raise RuntimeError("Set CDSE_USERNAME and CDSE_PASSWORD (free account at dataspace.copernicus.eu)")
         self.session = requests.Session()
         self.min_interval = min_interval
-        self._token, self._expires = None, 0.0
+        self._token, self._expires, self._auth_error = None, 0.0, None
         self._auth_lock, self._throttle_lock = threading.Lock(), threading.Lock()
         self._next_slot = 0.0
         self.stats = {"downloads": 0, "listings": 0, "bytes": 0, "http_429": 0, "http_5xx": 0, "tokens": 0}
@@ -165,6 +169,8 @@ class Client:
 
     def _auth(self, force=False):
         with self._auth_lock:
+            if self._auth_error:  # a refused login is final: never ask the identity server again
+                raise self._auth_error
             if force or time.time() > self._expires - 60:
                 r = requests.post(
                     TOKEN_URL,
@@ -176,6 +182,9 @@ class Client:
                     },
                     timeout=60,
                 )
+                if r.status_code in (400, 401):
+                    self._auth_error = AuthError(f"CDSE login refused (HTTP {r.status_code}): check CDSE_USERNAME / CDSE_PASSWORD")
+                    raise self._auth_error
                 r.raise_for_status()
                 tok = r.json()
                 self._token, self._expires = tok["access_token"], time.time() + tok["expires_in"]

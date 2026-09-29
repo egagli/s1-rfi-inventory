@@ -57,3 +57,38 @@ def test_run_writes_day_files_manifest_and_summary_and_skips_unchanged_days(tmp_
     assert not (tmp_path / "work" / "2023-09-16").exists()  # resume cache removed once the day is done
     # Same catalogue on a recheck: nothing redone
     assert daily.run(_StubClient(), **{**kw, "search": _fake_search(names)}) == []
+
+
+def test_refused_login_stops_the_run_before_any_day_is_recorded(tmp_path):
+    from s1rfi import cdse
+
+    class Refused(_StubClient):
+        def _auth(self, force=False):
+            raise cdse.AuthError("refused")
+
+    names = ["S1A_IW_GRDH_1SDV_20230916T063730_20230916T063755_050349_060FCD_AAAA.SAFE"]
+    try:
+        daily.run(Refused(), tmp_path / "manifest.csv", tmp_path / "out", tmp_path / "work", tmp_path / "summary.csv",
+                  start=D(2023, 9, 16), end=D(2023, 9, 17), log=lambda *_: None, search=_fake_search(names))
+        raise AssertionError("expected AuthError")
+    except cdse.AuthError:
+        pass
+    assert not (tmp_path / "manifest.csv").exists() and not (tmp_path / "out").exists()
+
+
+def test_a_day_with_nothing_harvested_is_not_recorded(tmp_path):
+    class AllFail(_StubClient):
+        def get_file(self, product_id, *path):
+            raise ConnectionError("down")
+
+        def list_nodes(self, product_id, *path):
+            raise ConnectionError("down")
+
+    names = ["S1A_IW_GRDH_1SDV_20230916T063730_20230916T063755_050349_060FCD_AAAA.SAFE"]
+    try:
+        daily.run(AllFail(), tmp_path / "manifest.csv", tmp_path / "out", tmp_path / "work", tmp_path / "summary.csv",
+                  start=D(2023, 9, 16), end=D(2023, 9, 17), log=lambda *_: None, search=_fake_search(names))
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as e:
+        assert "none of 1 products" in str(e)
+    assert not (tmp_path / "manifest.csv").exists()

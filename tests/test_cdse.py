@@ -80,3 +80,17 @@ def test_dropped_connection_retried(client):
     client.session = _Session([cdse.requests.ConnectionError("x")] * 4)
     with pytest.raises(cdse.requests.ConnectionError):
         client.get_file("id", "f")
+
+
+def test_refused_login_is_final_and_not_retried(monkeypatch):
+    calls = []
+
+    class R:
+        status_code = 401
+
+    monkeypatch.setattr(cdse.requests, "post", lambda *a, **k: calls.append(1) or R())
+    c = cdse.Client(username="u", password="p")
+    for _ in range(3):
+        with pytest.raises(cdse.AuthError):
+            c._auth()
+    assert len(calls) == 1
