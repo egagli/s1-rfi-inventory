@@ -93,7 +93,8 @@ harvesting and a few GB of files.
   - S1C and S1D report every other burst (5.52 s), at different times within the burst cycle.
   - Keep platforms as separate strata.
 - **Processor versions change.** Detection thresholds may differ between IPF versions, so the
-  processor version is kept in `product_processor_version`.
+  processor version is kept in `product_processor_version`. The CDSE catalogue does not give it
+  for older products (e.g. most of 2021), so it is missing there.
 - **Positions are approximate** (swath centre, ±~40 km). They are good enough for regional rates,
   not for locating a source.
 

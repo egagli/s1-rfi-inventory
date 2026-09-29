@@ -27,6 +27,9 @@ def test_newest_processing_keeps_latest_of_the_same_slice():
                         "processing_date": pd.to_datetime(["2024-01-10", "2024-03-01", "2024-01-10"])})
     out = daily.newest_processing(cat)
     assert sorted(out.name) == [f"{base}_778B.SAFE", "S1A_IW_GRDH_1SDV_x_y_1_2_AAAA.SAFE"]
+    # without a processing date (older products), the publication date decides
+    old = cat.assign(processing_date=pd.NaT, publication_date=pd.to_datetime(["2024-05-01", "2024-01-11", "2024-01-11"]))
+    assert f"{base}_4EE3.SAFE" in set(daily.newest_processing(old).name)
 
 
 def _fake_search(names):

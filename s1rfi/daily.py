@@ -61,14 +61,19 @@ def pick_days(manifest, start, end, recheck_days=7, today=None):
 
 
 def newest_processing(catalogue):
-    """Keep one product per slice: the latest ``processing_date`` among names that differ only in
-    their final 4-character unique id (the same slice processed more than once)."""
+    """Keep one product per slice: the latest processing among names that differ only in their
+    final 4-character unique id (the same slice processed more than once). "Latest" is by
+    ``processing_date``, or by ``publication_date`` where the catalogue has no processing date."""
     if catalogue.empty:
         return catalogue
     key = catalogue["name"].str.removesuffix(".SAFE").str.rsplit("_", n=1).str[0]
     order = catalogue.assign(_key=key)
-    if "processing_date" in order:
-        order = order.sort_values("processing_date", na_position="first")
+    when = [c for c in ("processing_date", "publication_date") if c in order]
+    if when:
+        t = order[when[0]]
+        for c in when[1:]:
+            t = t.fillna(order[c])
+        order = order.assign(_when=t).sort_values("_when", na_position="first").drop(columns="_when")
     return order.drop_duplicates("_key", keep="last").drop(columns="_key").sort_values("start").reset_index(drop=True)
 
 

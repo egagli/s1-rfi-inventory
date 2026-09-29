@@ -33,7 +33,9 @@ def search(start, end, wkt=None, product_type="IW_GRDH_1S", page_size=1000, sess
 
     Returns a DataFrame with id, name, start, end, footprint (WKT), platform,
     orbit_direction, relative_orbit, and the processing metadata processing_date,
-    processor_version (IPF), timeliness, datatake_id and slice_number. The CDSE "_COG"
+    processor_version (IPF), timeliness, datatake_id and slice_number, plus the CDSE
+    publication_date. The catalogue lacks processing date and version for older products
+    (e.g. most of 2021), so those are then missing. The CDSE "_COG"
     duplicates of GRD products are dropped. Long windows are fine: results are paged by time.
     """
     session = session or requests.Session()
@@ -71,6 +73,7 @@ def search(start, end, wkt=None, product_type="IW_GRDH_1S", page_size=1000, sess
                     "orbit_direction": attrs.get("orbitDirection"),
                     "relative_orbit": attrs.get("relativeOrbitNumber"),
                     "processing_date": pd.Timestamp(attrs["processingDate"]) if attrs.get("processingDate") else pd.NaT,
+                    "publication_date": pd.Timestamp(p["PublicationDate"]) if p.get("PublicationDate") else pd.NaT,
                     "processor_version": attrs.get("processorVersion"),
                     "timeliness": attrs.get("timeliness"),
                     "datatake_id": attrs.get("datatakeID"),
