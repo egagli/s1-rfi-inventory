@@ -15,9 +15,14 @@ computed, not just counts.
 ## What is in the data
 
 ESA's IPF runs an RFI detector on each product. Its output is in `annotation/rfi/*.xml`: per swath
-and polarization, a report for each noise sequence at the start of a burst, with a detection flag
-and test statistics, plus per-burst reports when mitigation was applied. This repository fetches
-only those small XML files (~50 KB per product, never the imagery) and flattens them into tables.
+and polarization,
+- a report for each noise sequence (at the start of a burst), with a detection flag and test
+  statistics;
+- a report per burst, with an in-band/out-of-band power ratio and, where ESA's mitigation examined
+  the burst, the fraction of lines and bandwidth affected.
+
+This repository fetches only those small XML files (one per polarization, ~30 KB each; never the
+imagery) and flattens them into tables.
 
 **`noise_YYYY-MM-DD.parquet`**: one row per noise report per polarization.
 
@@ -27,13 +32,16 @@ only those small XML files (~50 KB per product, never the imagery) and flattens 
 | `noise_sensing_time` | UTC time of the noise sequence |
 | `rfi_detected` | ESA's flag |
 | `max_kl_divergence`, `max_fisher_z`, `max_rfi_psd` | ESA's test statistics |
-| `latitude`, `longitude` | approximate position: the swath centre at that time, interpolated from the product footprint (±~40 km) |
+| `latitude`, `longitude` | the swath centre at that time, interpolated from the product footprint (within ~4 km of ESA's geolocation grid for IW, ~6 km for EW). This is where Sentinel-1 was looking, not where the source is: an emitter can be anywhere in the ~80 km-wide swath or reach the antenna from outside it |
 | `rfi_mitigation_applied` | the product's mitigation setting (e.g. `TimeFrequency`) |
 | `product_*` | product name, id, platform, orbit direction, relative orbit, start/end, processor (IPF) version, timeliness |
 | `duplicate` | `True` for a report repeated in the overlap of two consecutive slices of one datatake. **Exclude these before counting.** |
 
-**`bursts_YYYY-MM-DD.parquet`**: the per-burst reports (when present), with the same product
-columns and `duplicate`.
+**`bursts_YYYY-MM-DD.parquet`**: one row per burst report per polarization:
+- `azimuth_time`;
+- `in_out_band_power_ratio`;
+- the `td_*` / `fd_*` affected-lines and affected-bandwidth fields, where ESA reports them;
+- position, product columns and `duplicate`, as above.
 
 **`data/daily_summary.csv`** (in git): for each day × platform × mode × polarization, the
 catalogue products, harvested products, noise reports, flagged reports and products with
@@ -74,9 +82,15 @@ python scripts/harvest.py --help   # one area and period instead
 python -m pytest -q                # offline tests
 ```
 
-**Cost:** one global day (~600 products in 2024) takes ~2.5 min and ~1,200 requests, and gives
-~3 MB of Parquet. The full archive since Nov 2021 is ~1,800 days: very roughly 75–110 h of
-harvesting and a few GB of files.
+**Cost, measured:**
+
+| Day | Products | Time | Output |
+|---|---|---|---|
+| 2024-01-10 (S1A only) | ~600 | ~2.5 min, ~1,200 requests | ~3 MB |
+| 2021-11-04/05 (S1A + S1B) | ~1,100 | ~5 min | ~5 MB |
+
+The archive since Nov 2021 is ~1,800 days: very roughly 100–150 h of harvesting in total and a few
+GB of files.
 
 ## Things to know before using the flags
 
@@ -88,7 +102,7 @@ harvesting and a few GB of files.
   Europe and land, sparse over open ocean, at fixed local times (~06 and ~18 h). Normalise counts
   by the noise reports (effort), not by area or time alone.
 - **The platforms differ.**
-  - S1B stopped in Dec 2021; S1C data start in 2025 and S1D in 2026.
+  - S1B stopped in Dec 2021; S1C data start in 2025 and S1D in 2026; S1A ended in Jul 2026.
   - S1A reports one noise sequence at the start of every burst (every 2.76 s per swath).
   - S1C and S1D report every other burst (5.52 s), at different times within the burst cycle.
   - Keep platforms as separate strata.
