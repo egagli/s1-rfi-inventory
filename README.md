@@ -12,6 +12,44 @@ For each noise-sequence report, the inventory records:
 The sampling effort is kept too: reports without a detection are included, so rates can be
 computed, not just counts.
 
+## Figures
+
+Redrawn every Monday from the published data (`.github/workflows/figures.yml`, `scripts/figures.py`).
+Until the backfill reaches the present, they cover only the days done so far; the date range is
+printed on each figure. The tables behind them are in `figures/*.csv`.
+
+![Coverage](figures/coverage_map.png)
+
+**Where Sentinel-1 listened.** Noise reports per 1° cell: the sampling effort, and the denominator
+of every rate below. Coverage follows the acquisition plan (dense over land and Europe, sparse over
+open ocean). The striping comes from the positions being swath centres.
+
+![Flag rate](figures/flag_rate_map.png)
+
+**Where ESA's detector fired.**
+- The share of noise reports flagged per cell, for cells with at least 300 reports.
+- Grey cells were sampled but never flagged.
+- Persistent high rates mark places with steady in-band emitters, most of them ground radars.
+- A flag says that ESA's test fired. It does not say what the source was, and interference that
+  the test is not sensitive to is not counted.
+
+![Strong detections](figures/strong_rate_map.png)
+
+**Strong detections.** Flagged reports with ESA's `max_rfi_psd` ≥ 250, per 10,000 noise reports.
+That threshold is about the 90th percentile of flagged reports in Nov 2021 and Nov 2023 samples. The
+map picks out the most intense sources. The threshold is fixed, not recomputed, so it means the same
+thing at every date.
+
+![Monthly series](figures/monthly_series.png)
+
+**Change over time.** Monthly flag rate and monthly noise reports per platform.
+- Platform changes (S1B's end in Dec 2021, S1C from 2025, S1D from 2026, S1A's end in Jul 2026)
+  and ESA's mitigation (from Mar 2022) are the main confounders to keep in mind.
+- S1C/S1D report every other burst, so compare their rates with each other rather than with
+  S1A/S1B.
+- The figure shows global totals. It does not model them, so it does not by itself separate a real
+  change in interference from a change in where Sentinel-1 looked.
+
 ## What is in the data
 
 ESA's IPF runs an RFI detector on each product. Its output is in `annotation/rfi/*.xml`: per swath
@@ -43,6 +81,12 @@ imagery) and flattens them into tables.
 - the `td_*` / `fd_*` affected-lines and affected-bandwidth fields, where ESA reports them;
 - position, product columns and `duplicate`, as above.
 
+**`cells_YYYY-MM-DD.parquet`**: per 1° cell (the floored report position) × platform × co/cross
+polarization, the numbers of noise reports, flagged reports and strong reports (flagged with
+`max_rfi_psd` ≥ 250), with duplicates excluded. These are small files for maps and regional
+series. The first two days (2021-11-04/05) were published before these files existed; `scripts/figures.py` rebuilds them from the
+noise file.
+
 **`data/daily_summary.csv`** (in git): for each day × platform × mode × polarization, the
 catalogue products, harvested products, noise reports, flagged reports and products with
 mitigation applied. This is the effort layer for rate analyses.
@@ -68,6 +112,8 @@ Or download a month with `gh release download data-2024-01 --repo egagli/s1-rfi-
   - it downloads each product's RFI annotation, then consolidates and writes the day files.
 - Recent days are re-checked, because products reach the catalogue with a delay.
 - `.github/workflows/inventory.yml` runs it every 6 hours for up to ~5 hours, then publishes.
+- `.github/workflows/figures.yml` redraws the figures weekly (`pip install -r requirements-figures.txt`
+  for local use).
 - Requests are throttled (≤ 3 parallel downloads, ≥ 0.1 s apart, retries with back-off).
 - It needs a free CDSE account, supplied as the repository secrets `CDSE_USERNAME` and
   `CDSE_PASSWORD`. Nothing else is used.

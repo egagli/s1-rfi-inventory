@@ -50,9 +50,11 @@ def test_run_writes_day_files_manifest_and_summary_and_skips_unchanged_days(tmp_
               summary_path=tmp_path / "summary.csv", start=D(2023, 9, 16), end=D(2023, 9, 17), recheck_days=7,
               log=lambda *_: None, search=_fake_search(names))
     written = daily.run(_StubClient(), **kw)
-    assert [p.name for p in written] == ["noise_2023-09-16.parquet", "bursts_2023-09-16.parquet"]
+    assert [p.name for p in written] == ["noise_2023-09-16.parquet", "bursts_2023-09-16.parquet", "cells_2023-09-16.parquet"]
     noise = pd.read_parquet(written[0])
     assert len(noise) and "duplicate" in noise and noise["product_processor_version"].eq("003.61").all()
+    c = pd.read_parquet(written[2])
+    assert c["reports"].sum() == (~noise["duplicate"]).sum() and c["flagged"].sum() == noise.loc[~noise["duplicate"], "rfi_detected"].sum()
     m = daily.read_manifest(kw["manifest_path"])
     assert m.iloc[0][["catalogue_products", "harvested", "failed", "status"]].tolist() == [1, 1, 0, "done"]
     s = pd.read_csv(kw["summary_path"])

@@ -5,9 +5,10 @@ Each UTC day (by product sensing start) is one unit of work:
 1. catalogue search for the day (:func:`search_day`), keeping only the newest processing when the
    same slice was processed more than once;
 2. harvest of every product's RFI annotation (:func:`s1rfi.inventory.harvest`);
-3. consolidation into two files, ``noise_YYYY-MM-DD.parquet`` and ``bursts_YYYY-MM-DD.parquet``,
-   with a ``duplicate`` column marking reports repeated in the overlap of consecutive slices
-   (rows are kept, so nothing is lost);
+3. consolidation into ``noise_YYYY-MM-DD.parquet`` and ``bursts_YYYY-MM-DD.parquet``, with a
+   ``duplicate`` column marking reports repeated in the overlap of consecutive slices (rows are
+   kept, so nothing is lost), plus ``cells_YYYY-MM-DD.parquet``, a small per-1-degree-cell count of
+   reports, flags and strong flags (:func:`cells`) for maps and regional series;
 4. a per-day summary of sampling effort and detections (:func:`summarize`).
 
 A manifest (one row per day) records what is done, so a run can stop at any point (e.g. at the end
@@ -19,6 +20,7 @@ import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from s1rfi import cdse, inventory
@@ -26,6 +28,7 @@ from s1rfi import cdse, inventory
 MANIFEST_COLUMNS = ["day", "catalogue_products", "harvested", "failed", "attempts", "status", "last_run"]
 FIRST_DAY = cdse.RFI_ANNOTATION_START.date()  # first day with RFI annotations
 MAX_ATTEMPTS = 3  # a day whose failures persist this many runs is closed as "done" with failures
+STRONG_PSD = 250.0  # "strong" report: flagged with max_rfi_psd >= this (~90th percentile of flagged reports)
 
 
 def read_manifest(path):
@@ -124,10 +127,28 @@ def summarize(day, catalogue, noise):
     return g.assign(day=day)[cols]
 
 
+def cells(day, noise):
+    """Per 1-degree cell x platform x co/cross-polarization: noise reports, flagged reports and
+    strong reports (flagged with ``max_rfi_psd`` >= :data:`STRONG_PSD`), duplicates excluded. The
+    cell is the report's position (the swath centre), floored to whole degrees."""
+    cols = ["day", "cell_lat", "cell_lon", "platform", "copol", "reports", "flagged", "strong"]
+    if noise.empty:
+        return pd.DataFrame(columns=cols)
+    n = noise[~noise["duplicate"] & noise["latitude"].notna()]
+    n = n.assign(cell_lat=np.floor(n["latitude"]).astype(int), cell_lon=np.floor(n["longitude"]).astype(int),
+                 platform=n["product_name"].str[:3], copol=n["polarization"].isin(["VV", "HH"]),
+                 strong=n["rfi_detected"] & (n["max_rfi_psd"].fillna(0) >= STRONG_PSD))
+    g = n.groupby(["cell_lat", "cell_lon", "platform", "copol"]).agg(
+        reports=("rfi_detected", "size"), flagged=("rfi_detected", "sum"), strong=("strong", "sum")).reset_index()
+    g[["flagged", "strong"]] = g[["flagged", "strong"]].astype(int)
+    return g.assign(day=pd.Timestamp(day))[cols]
+
+
 def day_paths(out_dir, day):
+    """Paths of the day's noise, bursts and cells files."""
     d = pd.Timestamp(day)
     base = Path(out_dir) / f"{d:%Y}" / f"{d:%m}"
-    return base / f"noise_{d:%Y-%m-%d}.parquet", base / f"bursts_{d:%Y-%m-%d}.parquet"
+    return tuple(base / f"{kind}_{d:%Y-%m-%d}.parquet" for kind in ("noise", "bursts", "cells"))
 
 
 def run_day(client, day, out_dir, work_root, product_types=("IW_GRDH_1S", "EW_GRDM_1S"), workers=3,
@@ -155,15 +176,16 @@ def run_day(client, day, out_dir, work_root, product_types=("IW_GRDH_1S", "EW_GR
     retry = previous is not None and previous.get("status") != "done" and int(previous.get("harvested") or 0) > 0
     attempts = int(previous["attempts"]) + 1 if retry else 1
     status = "done" if failed == 0 or attempts >= MAX_ATTEMPTS else "partial"
-    n_path, b_path = day_paths(out_dir, day)
+    n_path, b_path, c_path = day_paths(out_dir, day)
     n_path.parent.mkdir(parents=True, exist_ok=True)
     noise.to_parquet(n_path, index=False, compression="zstd")
     bursts.to_parquet(b_path, index=False, compression="zstd")
+    cells(day, noise).to_parquet(c_path, index=False, compression="zstd")
     row = dict(day=day, catalogue_products=len(cat), harvested=harvested, failed=failed, attempts=attempts,
                status=status, last_run=pd.Timestamp.now("UTC").strftime("%Y-%m-%dT%H:%M:%SZ"))
     if status == "done":
         shutil.rmtree(work, ignore_errors=True)  # per-product files are only a resume cache
-    return row, summarize(day, cat, noise), [n_path, b_path]
+    return row, summarize(day, cat, noise), [n_path, b_path, c_path]
 
 
 def run(client, manifest_path, out_dir, work_root, summary_path, start=FIRST_DAY, end=None, recheck_days=7,

@@ -1,0 +1,45 @@
+# Redraws the README figures once a week from the published day files and the daily summary.
+name: Figures
+
+on:
+  schedule:
+    - cron: "41 7 * * 1"  # Mondays
+  workflow_dispatch:
+
+concurrency:
+  group: figures
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  figures:
+    if: github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write  # commit the figures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-figures.txt
+      - name: Restore the cell-file cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/cells
+          key: cells-${{ github.run_id }}
+          restore-keys: cells-
+      - name: Draw
+        run: python scripts/figures.py --out figures --cache .cache/cells
+      - name: Commit the figures
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add figures
+          git diff --cached --quiet && exit 0
+          git commit -m "Update figures"
+          git pull --rebase origin main && git push
