@@ -1,0 +1,77 @@
+# Builds and extends the inventory: every 6 hours, harvest pending days for up to ~5 hours, then
+# publish the day files as release assets and commit the small daily summary table.
+name: Inventory
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      max_days:
+        description: "Stop after this many days (blank: time budget only)"
+        required: false
+
+concurrency:
+  group: cdse-inventory  # never two runs on the same CDSE account at once
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    if: github.event.repository.fork == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write  # release assets and the summary commit
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check that the CDSE credentials are set
+        id: creds
+        env:
+          CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
+        run: |
+          if [ -n "$CDSE_USERNAME" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::CDSE_USERNAME/CDSE_PASSWORD secrets are not set: nothing to do"; fi
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.creds.outputs.ok == 'true'
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+        if: steps.creds.outputs.ok == 'true'
+
+      - name: Fetch the manifest
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          mkdir -p state
+          gh release download manifest --pattern manifest.csv --dir state \
+            || echo "No manifest yet: starting from the first day"
+
+      - name: Harvest pending days
+        if: steps.creds.outputs.ok == 'true'
+        timeout-minutes: 320
+        env:
+          CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
+          CDSE_PASSWORD: ${{ secrets.CDSE_PASSWORD }}
+          MAX_DAYS: ${{ inputs.max_days }}
+        run: |
+          python scripts/run_days.py --manifest state/manifest.csv --out out \
+            --summary data/daily_summary.csv --budget-minutes 290 --written out/written.txt \
+            --workers 3 --min-interval 0.1 ${MAX_DAYS:+--max-days "$MAX_DAYS"}
+
+      - name: Publish day files, then the manifest
+        if: always() && steps.creds.outputs.ok == 'true'
+        run: bash scripts/publish.sh
+
+      - name: Commit the daily summary
+        if: always() && steps.creds.outputs.ok == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/daily_summary.csv 2>/dev/null || exit 0
+          git diff --cached --quiet || { git commit -m "Update daily summary" && git push; }
