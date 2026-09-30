@@ -97,3 +97,13 @@ def test_a_day_with_nothing_harvested_is_not_recorded(tmp_path):
     except RuntimeError as e:
         assert "none of 1 products" in str(e)
     assert not (tmp_path / "manifest.csv").exists()
+
+
+def test_merge_summaries_keeps_every_day_and_prefers_the_last_table():
+    a = pd.DataFrame({"day": ["2022-01-01", "2022-01-02"], "platform": "S1A", "mode": "IW", "polarization": "VV",
+                      "noise_reports": [10, 20]})
+    b = pd.DataFrame({"day": ["2022-01-02", "2022-01-03"], "platform": "S1A", "mode": "IW", "polarization": "VV",
+                      "noise_reports": [25, 30]})
+    m = daily.merge_summaries(a, b)
+    assert m["day"].astype(str).tolist() == ["2022-01-01", "2022-01-02", "2022-01-03"]
+    assert m["noise_reports"].tolist() == [10, 25, 30]

@@ -144,6 +144,26 @@ def cells(day, noise):
     return g.assign(day=pd.Timestamp(day))[cols]
 
 
+SUMMARY_KEY = ["day", "platform", "mode", "polarization"]
+
+
+def merge_summaries(*tables):
+    """Union of daily summary tables, one row per day x platform x mode x polarization. For a day
+    present in several tables, the rows from the last table that has that day win (a later run
+    redoing a day replaces it whole)."""
+    parts = []
+    for i, t in enumerate(tables):
+        if t is not None and len(t):
+            parts.append(t.assign(_src=i, day=pd.to_datetime(t["day"]).dt.date))
+    if not parts:
+        return pd.DataFrame(columns=["day", "platform", "mode", "polarization", "catalogue_products", "products",
+                                     "noise_reports", "flagged", "mitigated_products"])
+    u = pd.concat(parts, ignore_index=True)
+    newest = u.groupby("day")["_src"].transform("max")
+    u = u[u["_src"] == newest].drop(columns="_src")
+    return u.sort_values(SUMMARY_KEY, na_position="last").reset_index(drop=True)
+
+
 def day_paths(out_dir, day):
     """Paths of the day's noise, bursts and cells files."""
     d = pd.Timestamp(day)

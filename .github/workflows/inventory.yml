@@ -37,6 +37,8 @@ jobs:
           else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::CDSE_USERNAME/CDSE_PASSWORD secrets are not set: nothing to do"; fi
       - uses: actions/checkout@v4
         if: steps.creds.outputs.ok == 'true'
+        with:
+          ref: main  # the branch as it is now, not the commit the (possibly long-queued) run was created on
       - uses: actions/setup-python@v5
         if: steps.creds.outputs.ok == 'true'
         with:
@@ -73,5 +75,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/daily_summary.csv 2>/dev/null || exit 0
-          git diff --cached --quiet || { git commit -m "Update daily summary" && git pull --rebase origin main && git push; }
+          [ -f data/daily_summary.csv ] || exit 0
+          # merge by row with whatever is on main now, so no run can drop another run's rows
+          cp data/daily_summary.csv "$RUNNER_TEMP/ours.csv"
+          git fetch origin main && git checkout -f -B main origin/main
+          python scripts/merge_summary.py data/daily_summary.csv data/daily_summary.csv "$RUNNER_TEMP/ours.csv"
+          git add data/daily_summary.csv
+          git diff --cached --quiet || { git commit -m "Update daily summary" && git push origin main; }
